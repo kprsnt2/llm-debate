@@ -1,51 +1,43 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import openai
-import os
-
 from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+from pydantic import BaseModel
+from openai import OpenAI
+import os
 
 app = FastAPI()
 
-# Set up OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class DebateRequest(BaseModel):
     topic: str
 
-def get_husband_response(topic: str) -> str:
-    response = openai.ChatCompletion.create(
+def get_response(role: str, topic: str, previous_response: str = "") -> str:
+    messages = [
+        {"role": "system", "content": f"You are a {role} in a debate. Provide a {'reasonable explanation' if role == 'husband' else 'counter-argument with examples or exceptions to your husband\'s perspective'} on the given topic."},
+        {"role": "user", "content": f"Topic: {topic}" + (f"\nHusband's perspective: {previous_response}" if role == "wife" else "")}
+    ]
+    
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a husband in a debate. Provide a reasonable explanation on the given topic."},
-            {"role": "user", "content": f"Give your perspective as a husband on: {topic}"}
-        ]
-    )
-    return response.choices[0].message.content
-
-def get_wife_response(topic: str, husband_response: str) -> str:
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a wife in a debate. Provide a counter-argument with examples or exceptions to your husband's perspective."},
-            {"role": "user", "content": f"Topic: {topic}\nHusband's perspective: {husband_response}\nGive your counter-argument:"}
-        ]
+        messages=messages
     )
     return response.choices[0].message.content
 
 @app.post("/api/debate")
 async def debate(request: DebateRequest):
     try:
-        husband_response = get_husband_response(request.topic)
-        wife_response = get_wife_response(request.topic, husband_response)
+        husband_response = get_response("husband", request.topic)
+        wife_response = get_response("wife", request.topic, husband_response)
         
         return {
             "topic": request.topic,
